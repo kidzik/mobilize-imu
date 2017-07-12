@@ -160,6 +160,8 @@ public:
     std::ifstream ifile2l("dataimu6/MT_012005D6-009-000_00B421ED.txt"); // tibia L
     ifiles.push_back(&ifile2l);
 
+    std::vector<SimTK::Rotation> rotations_xsens_osim = {rot_xsens_opensim, rot_xsens_opensim, rot_xsens_opensim, rot_xsens_opensiml, rot_xsens_opensiml};
+
     std::string line;
 
     for (int i=0; i<OSENSORS; i++){
@@ -190,7 +192,7 @@ public:
     ik.adoptAssemblyGoal(imus);
 
     for (int i=0; i<OSENSORS; i++){
-      imus->moveOneObservation(m_sensors_ox[i],   rot_xsens_opensim * rotations_initial[i] * rotations_obs[i] * rot_xsens_opensim.transpose() * rotations_osim[i]);
+      imus->moveOneObservation(m_sensors_ox[i], rotations_xsens_osim[i] * rotations_initial[i] * rotations_obs[i] * rotations_xsens_osim[i].transpose() * rotations_osim[i]);
     }
 
     // setup inverse kinematics
@@ -223,7 +225,7 @@ public:
 
 	  *ifiles[i] >> a;
 	  
-	  imus->moveOneObservation(m_sensors_ox[i],   rot_xsens_opensim * rotations_initial[i] * SimTK::Rotation(Rot) * rot_xsens_opensim.transpose() * rotations_osim[i]);
+	  imus->moveOneObservation(m_sensors_ox[i], rotations_xsens_osim[i] * rotations_initial[i] * SimTK::Rotation(Rot) * rot_xsens_opensim.transpose() * rotations_osim[i]);
 	}
 
 	// track
