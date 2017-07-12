@@ -62,10 +62,12 @@ class OrientationIK
   /************************************************************************/
   std::vector<std::string> m_body_names;
 
+  std::vector<std::string> m_datafiles;
+
   /************************************************************************/
   /* Number of observations used                                          */
   /************************************************************************/
-  static const int OSENSORS = 5;
+  int m_num_sensors;
 
   /************************************************************************/
   /* IMU indexes to point to the allocation space                         */
@@ -81,17 +83,37 @@ public:
 		std::string model_path,
 		std::string imu_path,
 		std::string result_path,
-		std::vector<std::string> body_names
+		std::vector<std::string> body_names,
+		std::vector<std::string> datafiles
 		)
     : m_model_path(model_path),
       m_imu_path(imu_path),
       m_ik_result_path(result_path),
-      m_body_names(body_names)  {
+      m_body_names(body_names),
+      m_datafiles(datafiles)  {
+    m_num_sensors = body_names.size();
   }
 
   ~OrientationIK()
   {
 
+  }
+
+  SimTK::Mat33 readData(std::ifstream* ifile) {
+    double a;
+    *ifile >> a;
+
+    SimTK::Mat33 Rot;
+    *ifile >> Rot[0][0];
+    *ifile >> Rot[1][0];
+    *ifile >> Rot[2][0];
+    *ifile >> Rot[0][1];
+    *ifile >> Rot[1][1];
+    *ifile >> Rot[2][1];
+    *ifile >> Rot[0][2];
+    *ifile >> Rot[1][2];
+    *ifile >> Rot[2][2];
+    return Rot;
   }
 
   /************************************************************************/
@@ -114,11 +136,8 @@ public:
     SimTK::OrientationSensors* imus = new SimTK::OrientationSensors();
 
     SimTK::Visualizer& viz = model.updVisualizer().updSimbodyVisualizer();
-
     viz.setDesiredFrameRate(1000);
     viz.drawFrameNow(state);
-
-    //getchar();
 
     // add markers
     addCustomMarkers(model, *markers, *imus);
@@ -127,72 +146,46 @@ public:
     OpenSim::Kinematics kinematics(&model);
     kinematics.setRecordAccelerations(true);
 
+    // Initial rotations with respect to opensim
+    // right leg
     SimTK::Rotation rot_xsens_opensim(SimTK::BodyOrSpaceType::BodyRotationSequence,
 				      -SimTK::Pi/2, SimTK::ZAxis,
 				      0, SimTK::YAxis,
 				      0, SimTK::XAxis);
-
+    // left leg
     SimTK::Rotation rot_xsens_opensiml(SimTK::BodyOrSpaceType::BodyRotationSequence,
 				       SimTK::Pi/2, SimTK::ZAxis,
 				       SimTK::Pi, SimTK::YAxis,
 				       0, SimTK::XAxis);
 
     model.getMultibodySystem().realize(state, SimTK::Stage::Report);
-    std::vector<SimTK::Rotation> rotations_osim;
 
-    for (int i=0; i<OSENSORS; i++){
+    std::vector<SimTK::Rotation> rotations_osim; // initial opensim rotations
+    std::vector<SimTK::Rotation> rotations_initial; // initial rotation of observations
+    std::vector<std::ifstream*> ifiles;
+
+    for (int i=0; i < m_num_sensors; i++){
       const SimTK::Transform transform = model.getSimbodyEngine().getTransform(state, model.getBodySet().get(m_body_names[i].c_str()));
       rotations_osim.push_back(transform.R());
     }
     
-    std::vector<SimTK::Rotation> rotations_obs;
-    std::vector<SimTK::Rotation> rotations_initial;
-    std::vector<std::ifstream*> ifiles;
-
-    std::ifstream ifile("dataimu6/MT_012005D6-009-000_00B4227C.txt"); // femur R
-    ifiles.push_back(&ifile);
-    std::ifstream ifileP("dataimu6/MT_012005D6-009-000_00B4226B.txt"); // pelvis
-    ifiles.push_back(&ifileP);
-    std::ifstream ifile2("dataimu6/MT_012005D6-009-000_00B4227D.txt"); // tibia
-    ifiles.push_back(&ifile2);
-    std::ifstream ifilel("dataimu6/MT_012005D6-009-000_00B421EE.txt"); // femur L
-    ifiles.push_back(&ifilel);
-    std::ifstream ifile2l("dataimu6/MT_012005D6-009-000_00B421ED.txt"); // tibia L
-    ifiles.push_back(&ifile2l);
+    for (int i=0; i < m_num_sensors; i++)
+      ifiles.push_back(new std::ifstream(m_datafiles[i]));
 
     std::vector<SimTK::Rotation> rotations_xsens_osim = {rot_xsens_opensim, rot_xsens_opensim, rot_xsens_opensim, rot_xsens_opensiml, rot_xsens_opensiml};
-
-    std::string line;
-
-    for (int i=0; i<OSENSORS; i++){
-      for(int j=0; j < 6; j++){
-	getline(*ifiles[i],line);
-      }
-      double a;
-      *ifiles[i] >> a;
-
-      SimTK::Mat33 Rot;
-      *ifiles[i] >> Rot[0][0];
-      *ifiles[i] >> Rot[1][0];
-      *ifiles[i] >> Rot[2][0];
-      *ifiles[i] >> Rot[0][1];
-      *ifiles[i] >> Rot[1][1];
-      *ifiles[i] >> Rot[2][1];
-      *ifiles[i] >> Rot[0][2];
-      *ifiles[i] >> Rot[1][2];
-      *ifiles[i] >> Rot[2][2];
-
-      *ifiles[i] >> a;
-      rotations_obs.push_back(SimTK::Rotation(Rot));
-    
-      rotations_initial.push_back(SimTK::Rotation(Rot).transpose());
-    }
 
     // move to initial target
     ik.adoptAssemblyGoal(imus);
 
-    for (int i=0; i<OSENSORS; i++){
-      imus->moveOneObservation(m_sensors_ox[i], rotations_xsens_osim[i] * rotations_initial[i] * rotations_obs[i] * rotations_xsens_osim[i].transpose() * rotations_osim[i]);
+    // Get the first observation and set things up
+    std::string line;
+    for (int i=0; i < m_num_sensors; i++){
+      for(int j=0; j < 6; j++){
+	getline(*ifiles[i],line);
+      }
+      SimTK::Mat33 rot_matrix_obs = readData(ifiles[i]);
+      rotations_initial.push_back(SimTK::Rotation(rot_matrix_obs).transpose());
+      imus->moveOneObservation(m_sensors_ox[i], rotations_xsens_osim[i] * rotations_initial[i] * SimTK::Rotation(rot_matrix_obs) * rotations_xsens_osim[i].transpose() * rotations_osim[i]);
     }
 
     // setup inverse kinematics
@@ -203,29 +196,14 @@ public:
 
     viz.drawFrameNow(state);
 
-    // getchar();
-
+    // Loop through all observations
     int iframe = 0;
-    while(!ifile.eof())
+    while(!(*ifiles[0]).eof())
       {
 	iframe++;
-	for (int i=0; i<OSENSORS; i++){
-	  double a;
-
-	  SimTK::Mat33 Rot;
-	  *ifiles[i] >> Rot[0][0];
-	  *ifiles[i] >> Rot[1][0];
-	  *ifiles[i] >> Rot[2][0];
-	  *ifiles[i] >> Rot[0][1];
-	  *ifiles[i] >> Rot[1][1];
-	  *ifiles[i] >> Rot[2][1];
-	  *ifiles[i] >> Rot[0][2];
-	  *ifiles[i] >> Rot[1][2];
-	  *ifiles[i] >> Rot[2][2];
-
-	  *ifiles[i] >> a;
-	  
-	  imus->moveOneObservation(m_sensors_ox[i], rotations_xsens_osim[i] * rotations_initial[i] * SimTK::Rotation(Rot) * rot_xsens_opensim.transpose() * rotations_osim[i]);
+	for (int i=0; i < m_num_sensors; i++){
+	  SimTK::Mat33 rot_matrix_obs = readData(ifiles[i]);
+	  imus->moveOneObservation(m_sensors_ox[i], rotations_xsens_osim[i] * rotations_initial[i] * SimTK::Rotation(rot_matrix_obs) * rotations_xsens_osim[i].transpose() * rotations_osim[i]);
 	}
 
 	// track
@@ -251,6 +229,11 @@ public:
 
     // store results
     kinematics.printResults(m_ik_result_path, "");
+
+    for (int i=0; i < m_num_sensors; i++)
+      delete ifiles[i];
+    ifiles.clear();
+
   }
 
 private:
@@ -262,7 +245,7 @@ private:
 			SimTK::Markers& markers, SimTK::OrientationSensors& imus)
   {
     // Add sensors
-    for(int i=0; i < OSENSORS; i++){
+    for(int i=0; i < m_num_sensors; i++){
       SimTK::OrientationSensors::OSensorIx m_mx = imus.addOSensor(m_body_names[i],
     			     model.updBodySet().get(m_body_names[i]).getMobilizedBodyIndex(),
     			     SimTK::Rotation(SimTK::BodyOrSpaceType::BodyRotationSequence,
@@ -276,8 +259,8 @@ private:
     // Match observations with sensors
     std::vector<char*> names;
     std::transform(m_body_names.begin(), m_body_names.end(), std::back_inserter(names), convert);  
-    imus.defineObservationOrder(OSENSORS, &names[0]);
-    for(int i=0; i < OSENSORS; i++){
+    imus.defineObservationOrder(m_num_sensors, &names[0]);
+    for(int i=0; i < m_num_sensors; i++){
       m_sensors_ox.push_back(imus.getObservationIxForOSensor(m_sensors_mx[i]));
     }
 
@@ -292,18 +275,28 @@ int main()
 {
   try {
 
+    std::vector<std::string> bodies = {
+      "femur_r",
+      "pelvis",
+      "tibia_r",
+      "femur_l",
+      "tibia_l"
+    };
+    std::vector<std::string> trackingFiles = {
+      "dataimu6/MT_012005D6-009-000_00B4227C.txt",
+      "dataimu6/MT_012005D6-009-000_00B4226B.txt",
+      "dataimu6/MT_012005D6-009-000_00B4227D.txt",
+      "dataimu6/MT_012005D6-009-000_00B421EE.txt",
+      "dataimu6/MT_012005D6-009-000_00B421ED.txt"
+    };
+
     OrientationIK ik(
 		     "Full_LegPelvisModel.osim",
-		     // "arm26.osim",
-		     // "FullBody.osim",
 		     "futureOrientationInverseKinematics.trc",
 		     "futureOrientationInverseKinematics",
-		     {"femur_r",
-			 "pelvis",
-			 "tibia_r",
-			 "femur_l",
-			 "tibia_l"
-			 });
+		     bodies,
+		     trackingFiles
+		     );
     ik.run();
 
   }
@@ -317,8 +310,6 @@ int main()
       std::cout << "Unrecognized exception " << std::endl;
       return 1;
     }
-
-  //system("pause");
 
   return 0;
 }
