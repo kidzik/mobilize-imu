@@ -172,8 +172,6 @@ public:
     for (int i=0; i < m_num_sensors; i++)
       ifiles.push_back(new std::ifstream(m_datafiles[i]));
 
-    std::vector<SimTK::Rotation> rotations_xsens_osim = {rot_xsens_opensim, rot_xsens_opensim, rot_xsens_opensim, rot_xsens_opensiml, rot_xsens_opensiml};
-
     // move to initial target
     ik.adoptAssemblyGoal(imus);
 
@@ -185,7 +183,24 @@ public:
       }
       SimTK::Mat33 rot_matrix_obs = readData(ifiles[i]);
       rotations_initial.push_back(SimTK::Rotation(rot_matrix_obs).transpose());
-      imus->moveOneObservation(m_sensors_ox[i], rotations_xsens_osim[i] * rotations_initial[i] * SimTK::Rotation(rot_matrix_obs) * rotations_xsens_osim[i].transpose() * rotations_osim[i]);
+    }
+
+    std::vector<SimTK::Rotation> rotations_xsens_osim = rotations_initial;
+    
+    SimTK::Rotation reference_rot(SimTK::BodyOrSpaceType::BodyRotationSequence,
+                                     -SimTK::Pi/2, SimTK::ZAxis,
+                                     0, SimTK::YAxis,
+                                     0, SimTK::XAxis);
+
+    for (int i=0; i < m_num_sensors; i++){
+      rotations_xsens_osim[i] = reference_rot * rotations_xsens_osim[i] * rotations_initial[1].transpose();
+      std::cout << rotations_xsens_osim[i] << std::endl;
+    }
+
+    std::cout << rot_xsens_opensim << std::endl;
+    std::cout << rot_xsens_opensiml << std::endl;
+    for (int i=0; i < m_num_sensors; i++){
+      imus->moveOneObservation(m_sensors_ox[i], rotations_xsens_osim[i] * rotations_initial[i] * rotations_initial[i].transpose() * rotations_xsens_osim[i].transpose() * rotations_osim[i]);
     }
 
     // setup inverse kinematics
