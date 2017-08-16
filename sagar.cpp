@@ -90,7 +90,8 @@ public:
       m_imu_path(imu_path),
       m_ik_result_path(result_path),
       m_body_names(body_names),
-      m_datafiles(datafiles)  {
+      m_datafiles(datafiles)
+  {
     m_num_sensors = body_names.size();
   }
 
@@ -119,7 +120,7 @@ public:
   /************************************************************************/
   /* Runs the inverse kinematics                                          */
   /************************************************************************/
-  void run()
+  void run(std::vector<SimTK::Rotation> rotations_xsens_osim)
   {
     // load model and data
     OpenSim::Model model(m_model_path);
@@ -146,18 +147,6 @@ public:
     OpenSim::Kinematics kinematics(&model);
     kinematics.setRecordAccelerations(true);
 
-    // Initial rotations with respect to opensim
-    // right leg
-    SimTK::Rotation rot_xsens_opensim(SimTK::BodyOrSpaceType::BodyRotationSequence,
-				      -SimTK::Pi/2, SimTK::ZAxis,
-				      0, SimTK::YAxis,
-				      0, SimTK::XAxis);
-    // left leg
-    SimTK::Rotation rot_xsens_opensiml(SimTK::BodyOrSpaceType::BodyRotationSequence,
-				       SimTK::Pi/2, SimTK::ZAxis,
-				       SimTK::Pi, SimTK::YAxis,
-				       0, SimTK::XAxis);
-
     model.getMultibodySystem().realize(state, SimTK::Stage::Report);
 
     std::vector<SimTK::Rotation> rotations_osim; // initial opensim rotations
@@ -171,8 +160,6 @@ public:
     
     for (int i=0; i < m_num_sensors; i++)
       ifiles.push_back(new std::ifstream(m_datafiles[i]));
-
-    std::vector<SimTK::Rotation> rotations_xsens_osim = {rot_xsens_opensim, rot_xsens_opensim, rot_xsens_opensim, rot_xsens_opensiml, rot_xsens_opensiml};
 
     // move to initial target
     ik.adoptAssemblyGoal(imus);
@@ -271,33 +258,50 @@ private:
 /**
  * Main function
  */
-int main()
+int main(int argc, char *argv[])
 {
+  if (argc < 2){
+    std::cout << "Usage: ./sagar [config-file]" << std::endl << std::endl;
+    return 0;
+  }
+  
   try {
+    // read config file
+    std::vector<SimTK::Rotation> rotations_xsens_osim;
+    std::vector<std::string> bodies;
+    std::vector<std::string> trackingFiles;
 
-    std::vector<std::string> bodies = {
-      "femur_r",
-      "pelvis",
-      "tibia_r",
-      "femur_l",
-      "tibia_l"
-    };
-    std::vector<std::string> trackingFiles = {
-      "dataimu6/MT_012005D6-009-000_00B4227C.txt",
-      "dataimu6/MT_012005D6-009-000_00B4226B.txt",
-      "dataimu6/MT_012005D6-009-000_00B4227D.txt",
-      "dataimu6/MT_012005D6-009-000_00B421EE.txt",
-      "dataimu6/MT_012005D6-009-000_00B421ED.txt"
-    };
+    std::string modelName, trcFile, resultPath;
+    int nimu;
+    std::ifstream fin =  std::ifstream(argv[1]);
+    fin >> modelName;
+    fin >> trcFile;
+    fin >> resultPath;
+    fin >> nimu;
+    for (int i = 0; i < nimu; i++)
+    {
+      double z, y, x;
+      std::string body;
+      std::string trackingFile;
+      fin >> body >> trackingFile;
+      fin >> z >> y >> x;
+      SimTK::Rotation rot(SimTK::BodyOrSpaceType::BodyRotationSequence,
+				      z, SimTK::ZAxis,
+				      y, SimTK::YAxis,
+				      x, SimTK::XAxis);
+      rotations_xsens_osim.push_back(rot);
+      bodies.push_back(body);
+      trackingFiles.push_back(trackingFile);
+    }
 
-    OrientationIK ik(
-		     "Full_LegPelvisModel.osim",
-		     "futureOrientationInverseKinematics.trc",
-		     "futureOrientationInverseKinematics",
+    // run IK
+    OrientationIK ik(modelName,
+		     trcFile,
+		     resultPath,
 		     bodies,
 		     trackingFiles
 		     );
-    ik.run();
+    ik.run(rotations_xsens_osim);
 
   }
   catch (const std::exception& ex)

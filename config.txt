@@ -1,0 +1,13 @@
+Full_LegPelvisModel.osim
+futureOrientationInverseKinematics.trc
+futureOrientationInverseKinematics
+5
+femur_r dataimu6/MT_012005D6-009-000_00B4227C.txt -1.57 0 0
+pelvis dataimu6/MT_012005D6-009-000_00B4226B.txt -1.57 0 0
+tibia_r dataimu6/MT_012005D6-009-000_00B4227D.txt -1.57 0 0
+femur_l dataimu6/MT_012005D6-009-000_00B421EE.txt 1.57 3.14 0
+tibia_l dataimu6/MT_012005D6-009-000_00B421ED.txt 1.57 3.14 0
+
+
+
+
